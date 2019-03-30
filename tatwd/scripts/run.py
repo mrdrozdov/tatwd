@@ -1,8 +1,18 @@
+"""
+TODO: Remove punctuation.
+"""
+
 import json
 import os
 import tempfile
 
 import turtle
+
+
+def tree_to_tokens(parse):
+    if not isinstance(parse, (list, tuple)):
+        return [parse]
+    return tree_to_tokens(parse[0]) + tree_to_tokens(parse[1])
 
 
 def tree_to_string(parse):
@@ -64,9 +74,6 @@ class CustomTurtle(object):
 
         xmin, xmax = min(xs), max(xs)
         ymin, ymax = min(ys), max(ys)
-
-        # -740.0 -628 0 200.0
-        print(xmin, xmax, ymin, ymax)
 
         height = 500
         width = 1500
@@ -229,13 +236,30 @@ class TreeFig(object):
             stack.append(x)
 
 
-    def draw_tree(self, parse):
+    def draw_tree(self, parse, **settings):
+
+        # Size
+        scale = 1
+        y0 = 65 * scale
+        yMax = 200 * scale
+        widthWindow = 1500 * scale
+        x0 = -widthWindow/2 + 10
 
         def write_sentence(s):
+
+            style = settings.get('style', None)
+
+            # Font Name
+            fontname = 'Helvetica Neue'
+
+            # Font Weight
+            fontweight = ['normal'] * len(s)
+            if style is not None:
+                fontweight = [x.get('fontweight', 'normal') for x in style]
             
-            font = ("Arial", 20 * scale, "normal")
             prv = self.cturtle.position()[0]
             for i, w in enumerate(s):
+                font = (fontname, 20 * scale, fontweight[i])
                 if i > 0:
                     turtle.write(' ', move=True, font=font)
                 turtle.write(w, move=True, font=font)
@@ -244,13 +268,6 @@ class TreeFig(object):
                 width = nxt-prv
                 prv = nxt
                 yield dict(mid=mid, nxt=nxt, width=width)
-
-        scale = 1
-        # x0 = -300 * scale
-        y0 = 65 * scale
-        yMax = 200 * scale
-        widthWindow = 1500 * scale
-        x0 = -widthWindow/2 + 10
 
         s, ts = convert_binary_bracketing(tree_to_string(parse))
 
@@ -292,10 +309,18 @@ def run_one(options, data):
 
         fig.setup_turtle(widthWindow, heightWindow, scale, x0)
 
-        # Draw
+        # Init turtle.
         ts = turtle.getscreen()
         ts.tracer(0, 0) # https://stackoverflow.com/questions/16119991/how-to-speed-up-pythons-turtle-function-and-stop-it-freezing-at-the-end
-        bounding_box = fig.draw_tree(parse)
+
+        # Draw settings.
+        settings = {}
+        settings['style'] = data.get('style', None)
+
+        # Draw.
+        bounding_box = fig.draw_tree(parse, **settings)
+
+        # Update Canvas.
         ts.update()
         ts.getcanvas().postscript(file=path_ps)
 
@@ -336,18 +361,38 @@ def run(options):
             data = json.loads(line)
             table[data['example_id']] = data
 
+    chosen = []
+
     for example_id in options.ids.split(','):
         data = table[example_id]
+        tokens = tree_to_tokens(data['binary_tree'])
+
+        # Debug.
+        print('tokens = {}'.format(tokens))
+        print('template = {}'.format([{} for _ in tokens]))
+
+        # Run.
         run_one(options, data)
 
+        # For log file.
+        chosen.append(data)
+
+    # Write results to log.
+    log_filename = os.path.join(options.log, '{}.log'.format(options.name))
+
+    with open(log_filename, 'w') as f:
+        for data in chosen:
+            f.write(json.dumps(data) + '\n')
 
 if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--path', default='examples/example.json', type=str)
-    parser.add_argument('--ids', default='ptb1094', type=str)
+    parser.add_argument('--ids', default='ptb1035', type=str)
     parser.add_argument('--out', default='./tmp', type=str)
+    parser.add_argument('--log', default='./log', type=str)
+    parser.add_argument('--name', default='demo', type=str)
     parser.add_argument('--style', default='box', choices=('standard', 'box', 'arc'))
     parser.add_argument('--color', default='#000', type=str)
     parser.add_argument('--size', default=None, type=float)

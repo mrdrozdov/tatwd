@@ -1,4 +1,4 @@
-{"example_id": "ptb1035", "binary_tree": ["Terms", [[["were", "n't"], "disclosed"], "."]]}
+{"example_id": "ptb1035", "binary_tree": ["Terms", [[["were", "n't"], "disclosed"], "."]], "style": [{}, {}, {}, {"fontweight": "bold"}, {}]}
 {"example_id": "ptb1094", "binary_tree": [["Estimated", "volume"], [["was", ["a", ["moderate", [["3.5", "million"], "ounces"]]]], "."]]}
 {"example_id": "ptb1149", "binary_tree": ["Ad", [["Notes", "..."], "."]]}
 {"example_id": "ptb1170", "binary_tree": ["Terms", [[["were", "n't"], "disclosed"], "."]]}
