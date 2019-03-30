@@ -9,6 +9,73 @@ import tempfile
 import turtle
 
 
+# Remove Punctuation
+
+punct_tokens = ['.', ',', '--', '$']
+
+
+def get_punctuation_mask(pt):
+    if isinstance(pt, str):
+        return pt
+
+    node = []
+    for subtree in pt:
+        x = get_punctuation_mask(subtree)
+        if isinstance(x, bool):
+            node.append(x)
+        elif isinstance(x, list):
+            node += x
+        elif isinstance(x, str):
+            if x in punct_tokens:
+                node.append(True)
+            else:
+                node.append(False)
+        else:
+            node.append(False)
+
+    if len(node) == 1:
+        node = node[0]
+
+    if isinstance(node, bool):
+        node = [node]
+
+    return node
+
+
+def remove_using_mask(_pt, _mask):
+    def func(pt, mask, pos=0):
+        if isinstance(pt, str):
+            if mask[pos]:
+                return pt, 1
+            return None, 1
+
+        node = []
+        sofar = pos
+        for subtree in pt:
+            x, size = func(subtree, mask, pos=sofar)
+            if x is not None and (isinstance(x, str) or len(x) > 0):
+                node.append(x)
+            sofar += size
+
+        node = tuple(node)
+
+        if len(node) == 1:
+            node = node[0]
+
+        size = sofar - pos
+
+        return node, size
+
+    if _mask is None:
+        raise ValueError
+
+    node = func(_pt, _mask)[0]
+
+    return node
+
+
+# Tree Methods
+
 def tree_to_tokens(parse):
     if not isinstance(parse, (list, tuple)):
         return [parse]
@@ -41,6 +108,8 @@ def convert_binary_bracketing(parse, lowercase=False):
                 transitions.append(0)
     return tokens, transitions
 
+
+# Draw Methods
 
 class Node(object):
     def __init__(self, val=None, width=None, height=None, pos=None, mid=None,
@@ -290,6 +359,13 @@ def run_one(options, data):
     example_id = data['example_id']
     parse = data['binary_tree']
 
+    mask = [not x for x in get_punctuation_mask(parse)]
+    parse = remove_using_mask(parse, mask)
+
+    style = data.get('style', None)
+    if style is not None:
+        style = [x for x, y in zip(style, mask) if y]
+
     with tempfile.NamedTemporaryFile(mode='w') as f:
         path_ps = f.name
         path_pdf = os.path.join(options.out, '{}.pdf'.format(example_id))
@@ -315,7 +391,7 @@ def run_one(options, data):
 
         # Draw settings.
         settings = {}
-        settings['style'] = data.get('style', None)
+        settings['style'] = style
 
         # Draw.
         bounding_box = fig.draw_tree(parse, **settings)
