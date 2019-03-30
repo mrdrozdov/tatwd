@@ -3,11 +3,17 @@ TODO: Find exact matches.
 TODO: Find close matches.
 TODO: Find matches by sequence.
 TODO: Find particles.
+
+References:
+- Crop / Split / Collate PDFs https://gist.github.com/roliveira/a18f6a16754edc9caa3424d9fa1e5d6d
+
 """
 
 import json
 import os
 import tempfile
+
+from PyPDF2 import PdfFileWriter, PdfFileReader
 
 import turtle
 
@@ -358,7 +364,7 @@ class TreeFig(object):
         return box
 
 
-def run_one(options, data):
+def run_one(options, data, name):
     example_id = data['example_id']
     parse = data['binary_tree']
 
@@ -371,7 +377,7 @@ def run_one(options, data):
 
     with tempfile.NamedTemporaryFile(mode='w') as f:
         path_ps = f.name
-        path_pdf = os.path.join(options.out, '{}-{}.pdf'.format(options.name, example_id))
+        path_pdf = os.path.join(options.out, '{}-{}.pdf'.format(name, example_id))
 
         turtle.speed('fastest')
 
@@ -408,11 +414,10 @@ def run_one(options, data):
         os.system('ps2pdf -dEPSCrop {} {}'.format(path_ps, path_pdf))
 
         # Crop the image.
-        from PyPDF2 import PdfFileWriter, PdfFileReader
 
         # print('bounding box = {}'.format(bounding_box))
 
-        output_filename = os.path.join(options.out, '{}-{}-cropped.pdf'.format(options.name, example_id))
+        output_filename = os.path.join(options.out, '{}-{}-cropped.pdf'.format(name, example_id))
         input1 = PdfFileReader(open(path_pdf, "rb"))
         output = PdfFileWriter()
 
@@ -430,34 +435,95 @@ def run_one(options, data):
         output.write(outputStream)
         outputStream.close()
 
+    return bounding_box
+
 
 def run(options):
+    filename_lst = [os.path.expanduser(fn) for fn in options.path.split(',')]
+    name_lst = options.name.split(',')
+    id_lst = options.ids.split(',')
 
-    table = {}
-
-    with open(options.path) as f:
-        for line in f:
-            data = json.loads(line)
-            table[data['example_id']] = data
+    assert len(filename_lst) == len(name_lst)
 
     chosen = []
+    boxes = {}
 
-    for example_id in options.ids.split(','):
-        data = table[example_id]
-        tokens = tree_to_tokens(data['binary_tree'])
+    # Create Initial PDFs
+    for filename, name in zip(filename_lst, name_lst):
+        table = {}
 
-        # Debug.
-        print('tokens = {}'.format(tokens))
-        print('template = {}'.format([{} for _ in tokens]))
+        with open(filename) as f:
+            for line in f:
+                data = json.loads(line)
+                data['name'] = name
+                table[data['example_id']] = data
 
-        # Run.
-        run_one(options, data)
+        for example_id in id_lst:
+            data = table[example_id]
+            tokens = tree_to_tokens(data['binary_tree'])
 
-        # For log file.
-        chosen.append(data)
+            # Debug.
+            print('tokens = {}'.format(tokens))
+            print('template = {}'.format([{} for _ in tokens]))
+
+            # Run.
+            bounding_box = run_one(options, data, name)
+
+            # For log file.
+            chosen.append(data)
+
+            boxes[(name, example_id)] = bounding_box
+
+    # Collate PDFs
+    if len(name_lst) > 1:
+        for example_id in id_lst:
+            output_lst = []
+            for name in name_lst:
+                output_filename = os.path.join(options.out, '{}-{}-cropped.pdf'.format(name, example_id))
+                output_lst.append(output_filename)
+
+            reader_lst = [PdfFileReader(open(fn, "rb")) for fn in output_lst]
+            output = PdfFileWriter()
+
+            x = reader_lst[0]
+            print(example_id)
+            print(x.pages[0].mediaBox.getHeight())
+            print(x.pages[0].trimBox.getHeight())
+            print(x.pages[0].cropBox.getHeight())
+
+            total_height = sum([x.pages[0].trimBox.getHeight() for x in reader_lst])
+            max_width = max([x.pages[0].trimBox.getWidth() for x in reader_lst])
+
+            page = output.addBlankPage(
+                width=max_width,
+                height=total_height,
+            )
+
+            import decimal
+            sofar = total_height
+            for i, (x, name) in enumerate(zip(reader_lst, name_lst)):
+                bounding_box = boxes[(name, example_id)]
+
+                pdf_height = x.pages[0].mediaBox.getHeight()
+                crop_height = decimal.Decimal(bounding_box['y1']) - decimal.Decimal(bounding_box['y0'])
+                pad_top = pdf_height - decimal.Decimal(bounding_box['y1'])
+                pad_bottom = decimal.Decimal(bounding_box['y0'])
+
+                ystart = sofar - (pad_bottom + crop_height)
+
+                page.mergeTranslatedPage(x.pages[0], 0, ystart)
+
+                sofar = sofar - crop_height
+
+            # TODO: Do we need a unifying name?
+            output_filename = os.path.join(options.out, '{}-collate.pdf'.format(example_id))
+            outputStream = open(output_filename, "wb")
+            output.write(outputStream)
+            outputStream.close()
+
 
     # Write results to log.
-    log_filename = os.path.join(options.log, '{}.log'.format(options.name))
+    log_filename = os.path.join(options.log, '{}.log'.format('-'.join(name_lst)))
 
     with open(log_filename, 'w') as f:
         for data in chosen:
