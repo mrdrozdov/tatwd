@@ -1,5 +1,8 @@
 """
-TODO: Remove punctuation.
+TODO: Find exact matches.
+TODO: Find close matches.
+TODO: Find matches by sequence.
+TODO: Find particles.
 """
 
 import json
@@ -11,7 +14,7 @@ import turtle
 
 # Remove Punctuation
 
-punct_tokens = ['.', ',', '--', '$']
+punct_tokens = ['.', ',', '--', '$', "''", '"', '``', '?', '!']
 
 
 def get_punctuation_mask(pt):
@@ -368,7 +371,7 @@ def run_one(options, data):
 
     with tempfile.NamedTemporaryFile(mode='w') as f:
         path_ps = f.name
-        path_pdf = os.path.join(options.out, '{}.pdf'.format(example_id))
+        path_pdf = os.path.join(options.out, '{}-{}.pdf'.format(options.name, example_id))
 
         turtle.speed('fastest')
 
@@ -409,7 +412,7 @@ def run_one(options, data):
 
         # print('bounding box = {}'.format(bounding_box))
 
-        output_filename = os.path.join(options.out, '{}-cropped.pdf'.format(example_id))
+        output_filename = os.path.join(options.out, '{}-{}-cropped.pdf'.format(options.name, example_id))
         input1 = PdfFileReader(open(path_pdf, "rb"))
         output = PdfFileWriter()
 
