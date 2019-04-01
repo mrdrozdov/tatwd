@@ -85,6 +85,17 @@ def remove_using_mask(_pt, _mask):
 
 # Tree Methods
 
+def flatten_tree(tr):
+    def func(tr):
+        if not isinstance(tr, (list, tuple)):
+            return [tr]
+        result = []
+        for x in tr:
+            result += func(x)
+        return result
+    return func(tr)
+
+
 def tree_to_tokens(parse):
     if not isinstance(parse, (list, tuple)):
         return [parse]
@@ -97,24 +108,63 @@ def tree_to_string(parse):
     if len(parse) == 1:
         return parse[0]
     else:
-        return '( ' + tree_to_string(parse[0]) + ' ' + tree_to_string(parse[1]) + ' )'
+        result = '( '
+        for i, x in enumerate(parse):
+            if i > 0:
+                result += ' '
+            result += tree_to_string(x)
+        result += ' )'
+        return result
 
 
 def convert_binary_bracketing(parse, lowercase=False):
     transitions = []
     tokens = []
 
-    for word in parse.split(' '):
-        if word[0] != "(":
-            if word == ")":
-                transitions.append(1)
-            else:
-                # Downcase all words to match GloVe.
-                if lowercase:
-                    tokens.append(word.lower())
+    _tokens = [x for x in parse.split(' ') if x not in (')', '(')]
+    print('parse:', parse)
+    print('tokens:', _tokens)
+    counter = 0
+    counter_stack = []
+    buff = list(reversed(_tokens))
+    stack = []
+
+    for i, word in enumerate(parse.split(' ')):
+        if word[0] == "(":
+            counter_stack.append(counter)
+        elif word == ")":
+            pivot = counter_stack.pop()
+            size = counter - pivot
+            counter = pivot + 1
+
+            substack = []
+            for j in range(size):
+                substack = [stack.pop()] + substack
+
+                if j == 0:
+                    pass
+                elif j < size - 1:
+                    transitions.append(2)
                 else:
-                    tokens.append(word)
-                transitions.append(0)
+                    transitions.append(1)
+            stack.append(substack)
+
+        else:
+            # Downcase all words to match GloVe.
+            if lowercase:
+                tokens.append(word.lower())
+            else:
+                tokens.append(word)
+            transitions.append(0)
+
+            stack.append(buff.pop())
+            counter += 1
+
+    print('demo:')
+    print(parse)
+    print(transitions)
+    print(stack)
+
     return tokens, transitions
 
 
@@ -191,6 +241,10 @@ class TreeFig(object):
         sofar = 0
         stack = []
 
+        # For n-ary.
+        substack = []
+        #
+
         if mask is None:
             mask = [0] * len(ts)
         mask = [x == 1 for x in mask]
@@ -200,12 +254,25 @@ class TreeFig(object):
 
         # SR
         for t, m in zip(ts, mask):
-            if t == 0: # Shift
+
+            x = None
+            if t == 2:
+                substack.append(True)
+            elif t == 0: # Shift
+                #
                 x = buff.pop()
                 sofar += 1
             elif t == 1: # Reduce
                 rx = stack.pop()
                 lx = stack.pop()
+
+                # n-ary
+                middle = []
+                while len(substack) > 0:
+                    middle.append(lx)
+                    substack.pop()
+                    lx = stack.pop()
+                #
 
                 xpos = min(lx.pos, rx.pos)
 
@@ -308,13 +375,27 @@ class TreeFig(object):
                 elif self.style == 'arc':
                     arctree()
 
+                for node in middle:
+                    if node.height == 1 and x.height == 2:
+                        continue
+                    nodemid = node.mid
+                    nodey = y0 + (node.height-1) * interval
+                    print('node-middle', nodemid, nodey)
+
+                    turtle.penup()
+                    self.cturtle.goto(nodemid, nodey)
+                    turtle.pendown()
+                    self.cturtle.goto(nodemid, xy)
+                    turtle.penup()
+
                 if m:
                     turtle.pencolor(default)
 
-            stack.append(x)
+            if x is not None:
+                stack.append(x)
 
 
-    def draw_tree(self, parse, **settings):
+    def draw_tree(self, parse, tokens, **settings):
 
         # Size
         scale = 1
@@ -349,7 +430,7 @@ class TreeFig(object):
 
         s, ts = convert_binary_bracketing(tree_to_string(parse))
 
-        lst = list(write_sentence(s))
+        lst = list(write_sentence(tokens))
         mids = [d['mid'] for d in lst]
         nxts = [d['nxt'] for d in lst]
         ws = [d['width'] for d in lst]
@@ -364,9 +445,9 @@ class TreeFig(object):
         return box
 
 
-def run_one(options, data, name):
+def run_one(options, data, tokens, name, tree_key='binary_tree'):
     example_id = data['example_id']
-    parse = data['binary_tree']
+    parse = data[tree_key]
 
     mask = [not x for x in get_punctuation_mask(parse)]
     parse = remove_using_mask(parse, mask)
@@ -403,7 +484,7 @@ def run_one(options, data, name):
         settings['style'] = style
 
         # Draw.
-        bounding_box = fig.draw_tree(parse, **settings)
+        bounding_box = fig.draw_tree(parse, tokens, **settings)
 
         # Update Canvas.
         ts.update()
@@ -441,6 +522,7 @@ def run_one(options, data, name):
 def run(options):
     filename_lst = [os.path.expanduser(fn) for fn in options.path.split(',')]
     name_lst = options.name.split(',')
+    tree_key_lst = options.tree_key.split(',')
     id_lst = options.ids.split(',')
 
     assert len(filename_lst) == len(name_lst)
@@ -448,9 +530,13 @@ def run(options):
     chosen = []
     boxes = {}
 
-    # Create Initial PDFs
-    for filename, name in zip(filename_lst, name_lst):
-        table = {}
+    # Read everything first.
+    name2table = {name: {} for name in name_lst}
+
+    for i, filename in enumerate(filename_lst):
+        name = name_lst[i]
+        tree_key = tree_key_lst[i]
+        table = name2table[name]
 
         with open(filename) as f:
             for line in f:
@@ -458,16 +544,34 @@ def run(options):
                 data['name'] = name
                 table[data['example_id']] = data
 
+    # Create initial PDFs.
+    for i, name in enumerate(name_lst):
+        tree_key = tree_key_lst[i]
+        table = name2table[name]
+        token_table = name2table[name_lst[-1]]
+
         for example_id in id_lst:
             data = table[example_id]
-            tokens = tree_to_tokens(data['binary_tree'])
+
+            # Get tokens.
+            parse = token_table[example_id][tree_key]
+            mask = [not x for x in get_punctuation_mask(parse)]
+            parse = remove_using_mask(parse, mask)
+            tokens = flatten_tree(parse)
+
+            parse = table[example_id][tree_key]
+            mask = [not x for x in get_punctuation_mask(parse)]
+            parse = remove_using_mask(parse, mask)
+            name_tokens = flatten_tree(parse)
+
+            assert len(tokens) == len(name_tokens)
 
             # Debug.
             print('tokens = {}'.format(tokens))
             print('template = {}'.format([{} for _ in tokens]))
 
             # Run.
-            bounding_box = run_one(options, data, name)
+            bounding_box = run_one(options, data, tokens, name, tree_key)
 
             # For log file.
             chosen.append(data)
@@ -538,6 +642,7 @@ if __name__ == '__main__':
     parser.add_argument('--out', default='./tmp', type=str)
     parser.add_argument('--log', default='./log', type=str)
     parser.add_argument('--name', default='demo', type=str)
+    parser.add_argument('--tree_key', default='binary_tree', type=str)
     parser.add_argument('--style', default='box', choices=('standard', 'box', 'arc'))
     parser.add_argument('--color', default='#000', type=str)
     parser.add_argument('--size', default=None, type=float)
